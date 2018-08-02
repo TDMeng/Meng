@@ -1,0 +1,677 @@
+#include "audioTransParamers.h"
+
+#define GAP 9
+#define SAMPLEBUS 10
+
+u8 ByteDest[12] = {0};
+float floatDest = 0;
+float floatDest1 = 0;
+float floatDest2 = 0;
+int eFlag = 4;
+int index_0 = 1;
+int index_1 = 1;
+
+int indexPub = 0;
+uint32_t audioDataBuf[100] = {0}; 
+
+//u32 virData[48] = {0};//= {1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+//u32 virData[106] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+									//0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};	
+	
+//u32 virData[53] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0};	
+
+extern u8 sairecbuf1[];
+extern u8 sairecbuf2[];
+extern u8 saiplaybuf1[];
+extern u8 saiplaybuf2[];	
+extern u8 intFlag;
+extern u16 ptr;
+extern int16_t tempInt;
+extern int IndexNum;	
+	
+int32_t index = 0;
+int64_t alSum = 0;
+int64_t alTmp = 0;	
+int64_t alSumBuffer[500] = {0};
+int64_t pubRecvBuf[SAMPLEBUS] = {0};
+uint32_t pdex = 0;
+int64_t pubRecvBufSum = 0;
+
+uint32_t audioDataTmp = 0;
+
+uint32_t recvTmpbuf[48] = {0};
+
+extern u32 *recvAudioTmpBuf;
+
+extern int32_t alIndex;
+extern int64_t * alTmpbuf;
+extern u32 *recvAudioBuf;
+extern u32 recvIndex;
+extern u32 recvIndexMax;
+
+extern u32 dataRecvFlag;
+extern uint64_t dataRecvMaxSample;
+extern uint64_t dataRecvMidSample;
+
+#define SAMPLESIZE 44
+#define PARAMERSIZE 20
+u32 paramersRecvBuf[PARAMERSIZE] = {0};
+
+float leftData;
+
+float rightData;
+
+u8 ChangeBitToByte(u32 *src)
+{
+	u32 tmp = 0;
+	tmp = src[0] * 128 + src[1] * 64 + src[2] * 32 + src[3] * 16 + src[4] * 8 + src[5] * 4 + src[6] * 2 + src[7] * 1;
+	return (u16)tmp;
+}
+
+
+void TransByteToFloat(u8 *srcByte, float *destFloat)
+{
+	uint32_t i = 0;
+	u8 *floatTmp = (u8*)destFloat;
+	
+	for (i = 0; i < 4; i++)
+	{
+		*(floatTmp + i) = *(srcByte + i);
+	}
+}
+
+#if 1
+void AudioTransDataProcess(void)
+{
+	if (intFlag&0x01)
+	{
+			ptr = 0;
+			while (ptr < (SAI_RX_DMA_BUF_SIZE))
+			{
+			 	tempInt = (sairecbuf1[ptr + 1] << 8) & 0xff00;
+				tempInt |= sairecbuf1[ptr] & 0x00ff;
+			
+				leftData = (float)tempInt;
+				
+				if (index < 44 )
+				{
+					alTmp += tempInt * tempInt;
+					index++;
+				}
+				else
+				{
+					if(dataRecvFlag == 0)
+					{
+						index = 0;
+//						printf("----1-----alTmp = %lld\n\r",alTmp);
+						if (pdex < SAMPLEBUS)
+						{
+							if (30000000 < alTmp)
+							{
+								pubRecvBuf[pdex] = alTmp;
+//							printf("pubRecvBuf[%d] = %lld\n\r",pdex,pubRecvBuf[pdex]);
+								pdex++;					
+							}
+
+						}
+						else
+						{
+
+							for (int i = 0; i < SAMPLEBUS; i++)
+							{
+//								printf("pubRecvBuf[%d] = %lld\n\r",i,pubRecvBuf[i]);
+
+								if (pubRecvBuf[i] / 2500000 < 100)
+								{
+									pdex--;
+								}
+							}
+							pdex = pdex + 1;
+							if (pdex > 8)
+							{			
+//								printf("--1--pdex = %d\n\r",pdex);	
+//								printf("--1---pdex = %d pubRecvBuf[8] = %lld\n\r",pdex,pubRecvBuf[8]);
+								dataRecvFlag = 1;
+								pdex = 0;
+								dataRecvMaxSample = pubRecvBuf[8] / 2500000;
+								dataRecvMidSample = dataRecvMaxSample / 6;		
+								printf("dataRecvMaxSample = %lld dataRecvMidSample = %lld\n\r",dataRecvMaxSample,dataRecvMidSample);					
+								
+							}
+							
+						}
+						//pdex = 0;
+						alTmp = 0;				
+					}
+					else if (dataRecvFlag == 1)
+					{
+//						printf("alTmp1 = %lld\n\r",alTmp);
+
+						alTmp = alTmp / 2000000;
+//						printf("alTmp1 = %lld\n\r",alTmp);
+						if (alTmp > dataRecvMaxSample )
+						{
+							audioDataTmp = 5;
+						}
+						else if (alTmp < dataRecvMaxSample && alTmp > dataRecvMidSample)
+						{
+						audioDataTmp = 1;
+						}
+						else if (alTmp < dataRecvMidSample)
+						{
+							audioDataTmp = 0;
+						}			
+//						printf("audioDataTmp = %d\n\r",audioDataTmp);
+						ProcessDataStream(audioDataTmp);
+						alTmp = 0;
+						index = 0;
+//						printf("There are some data for recv! \n\r");
+					}				
+				}
+				
+
+#if 0
+				else
+				{
+//					printf("----1-----alTmp = %lld\n\r",alTmp);
+
+					index = 0;
+					if (pdex < SAMPLEBUS && dataRecvFlag == 0)
+					{
+						pubRecvBuf[pdex] = alTmp;
+						printf("pubRecvBuf[%d] = %lld\n\r",pdex,pubRecvBuf[pdex]);
+						pdex++;
+					}
+					else //if (dataRecvFlag == 0 && pdex == 30)
+					{
+						for(int i = 0; i < SAMPLEBUS; i++)
+						{
+//							printf("pubRecvBuf[%d] = %lld\n\r",i,pubRecvBuf[i]);
+
+							if (pubRecvBuf[i] / 2000000 < 5)
+							{
+								pdex--;
+							}
+//							else
+//							{
+//								pubRecvBufSum +=  pubRecvBuf[i];
+//							}								
+						}
+						if (pdex > 8)
+						{
+							printf("---1---pdex = %d\n\r",pdex);
+
+//							dataRecvMaxSample = pubRecvBufSum / (10 - pdex);
+							dataRecvFlag = 1;
+							pdex = 0;
+//							dataRecvMaxSample = dataRecvMaxSample / 3000000;
+							dataRecvMaxSample = pubRecvBuf[SAMPLEBUS/2] / 3000000;
+							dataRecvMidSample = dataRecvMaxSample / 4;
+//							printf("+++++++1+++++++++dataRecvMaxSample = %lld    dataRecvMidSample = %lld\n\r",dataRecvMaxSample,dataRecvMidSample);							
+
+						}
+						pdex = 0;
+						pubRecvBufSum = 0;
+						
+					}
+					memset(pubRecvBuf, 0 , SAMPLEBUS);//sizeof(int64_t) * 10);
+					if (dataRecvFlag == 1)
+					{
+						alTmp = alTmp / 2300000;
+//						printf("1alTmp = %lld\n\r",alTmp);
+
+						if (alTmp > dataRecvMaxSample )
+						{
+							audioDataTmp = 5;
+						}
+						else if (alTmp < dataRecvMaxSample && alTmp > dataRecvMidSample)
+						{
+							audioDataTmp = 1;
+						}
+						else if (alTmp < dataRecvMidSample)
+						{
+							audioDataTmp = 0;
+						}
+						printf("1audioDataTmp = %d\n\r",audioDataTmp);
+//						ProcessDataStream(audioDataTmp);
+					}
+					alTmp = 0;
+	
+				}
+#endif				
+				ptr+=4;
+			}		
+			intFlag&=0xFE;			
+	}
+	
+	if (intFlag&0x04)
+	{
+			ptr = 0;
+			while (ptr < (SAI_RX_DMA_BUF_SIZE))
+			{
+			 	tempInt = (sairecbuf2[ptr + 1] << 8) & 0xff00;
+				tempInt |= sairecbuf2[ptr] & 0x00ff;
+			
+				leftData = (float)tempInt;
+				
+				if (index < 44)
+				{
+					alTmp += tempInt * tempInt;
+					index++;
+				}
+				else
+				{		
+					if (dataRecvFlag == 0)
+					{
+						index = 0;
+//						printf("----2-----alTmp = %lld\n\r",alTmp);
+						if (pdex < SAMPLEBUS)
+						{
+							if (30000000 < alTmp)
+							{
+								pubRecvBuf[pdex] = alTmp;
+//							printf("pubRecvBuf[%d] = %lld\n\r",pdex,pubRecvBuf[pdex]);
+								pdex++;					
+							}
+						}
+						else
+						{
+							for (int i = 0; i < SAMPLEBUS; i++)
+							{
+//								printf("pubRecvBuf[%d] = %lld\n\r",i,pubRecvBuf[i]);
+
+								if (pubRecvBuf[i] / 2500000 < 100)
+								{
+									pdex--;
+								}
+							}
+							pdex = pdex + 1;
+							
+							if (pdex > 8)
+							{
+//								printf("--2--pdex = %d\n\r",pdex);
+//								printf("--2---pdex = %d pubRecvBuf[8] = %lld\n\r",pdex,pubRecvBuf[8]);
+								dataRecvFlag = 1;
+								pdex = 0;
+								dataRecvMaxSample = pubRecvBuf[8] / 2500000;
+								dataRecvMidSample = dataRecvMaxSample / 6;
+								printf("dataRecvMaxSample = %lld dataRecvMidSample = %lld\n\r",dataRecvMaxSample,dataRecvMidSample);
+							}
+
+						}				
+						alTmp = 0;
+						//pdex = 0;
+					}
+					else if (dataRecvFlag == 1)
+					{
+//						printf("alTmp2 = %lld\n\r",alTmp);
+						alTmp = alTmp / 2000000;
+//						printf("alTmp2 = %lld\n\r",alTmp);
+						if (alTmp > dataRecvMaxSample )
+						{
+							audioDataTmp = 5;
+						}
+						else if (alTmp < dataRecvMaxSample && alTmp > dataRecvMidSample)
+						{
+							audioDataTmp = 1;
+						}
+						else if (alTmp < dataRecvMidSample)
+						{
+							audioDataTmp = 0;
+						}			
+//						printf("audioDataTmp = %d\n\r",audioDataTmp);
+						ProcessDataStream(audioDataTmp);
+						alTmp = 0;
+						index = 0;						
+//						printf("There are something to recv!\n\r");
+					}
+				}
+#if 0				
+				else
+				{
+//					printf("----2-----alTmp = %lld\n\r",alTmp);
+					index = 0;
+					if (pdex < SAMPLEBUS && dataRecvFlag == 0)
+					{
+						pubRecvBuf[pdex] = alTmp;
+//						printf("pubRecvBuf[%d] = %lld\n\r",pdex,pubRecvBuf[pdex]);
+
+						pdex++;
+					}
+					else //if (dataRecvFlag == 0 && pdex == 30)
+					{
+						for(int i = 0; i < SAMPLEBUS; i++)
+						{
+//							printf("pubRecvBuf[%d] = %lld\n\r",i,pubRecvBuf[i]);
+
+							if (pubRecvBuf[i] / 3000000 < 5)
+							{
+								pdex--;
+							}				
+//							else
+//							{
+//								pubRecvBufSum += pubRecvBuf[i];
+//							}
+						}
+						
+						if (pdex > 8)
+						{
+							printf("--2---pdex = %d pubRecvBuf[8] = %lld\n\r",pdex,pubRecvBuf[8]);
+//							dataRecvMaxSample = pubRecvBufSum / (10 - pdex);
+							dataRecvFlag = 1;
+							pdex = 0;
+//							dataRecvMaxSample = dataRecvMaxSample / 3000000;
+							dataRecvMaxSample = pubRecvBuf[8] / 3000000;
+							dataRecvMidSample = dataRecvMaxSample / 4;
+//							printf("++++++++2++++++++dataRecvMaxSample = %lld    dataRecvMidSample = %lld\n\r",dataRecvMaxSample,dataRecvMidSample);							
+
+						}
+						pdex = 0;
+						pubRecvBufSum = 0;
+					}
+					
+					memset(pubRecvBuf, 0 , SAMPLEBUS);//sizeof(int64_t) * 10);					
+					if (dataRecvFlag == 1)
+					{
+						alTmp = alTmp / 2800000;
+//						printf("2alTmp = %lld\n\r",alTmp);
+						if (alTmp > dataRecvMaxSample)
+						{
+							audioDataTmp = 5;
+						}
+						else if (alTmp < dataRecvMaxSample && alTmp > dataRecvMidSample)
+						{
+							audioDataTmp = 1;
+						}
+						else if (alTmp < dataRecvMidSample)
+						{
+							audioDataTmp = 0;
+						}
+//						printf("2audioDataTmp = %d\n\r",audioDataTmp);
+
+						ProcessDataStream(audioDataTmp);
+					}
+					alTmp = 0;
+				}
+#endif				
+				ptr+=4;
+			}	
+			intFlag&=0xFB;					
+	}
+			
+}
+#endif
+
+
+//extern u32 *recvAudioBuf;
+//extern u32 recvIndex;
+//extern u32 recvIndexMax;
+void TransBufToData(void)
+{
+	if (IndexNum < recvIndexMax)
+	{
+		if (eFlag == 4)
+		{
+			if (recvAudioTmpBuf[IndexNum] == 0)//virData//recvTmpbuf
+			{
+				eFlag = 0;
+				index_0++;
+				IndexNum++;
+				TransBufToData();
+			}
+			else
+			{
+				eFlag = 1;
+				index_1++;
+				IndexNum++;
+				TransBufToData();		
+			}
+		}
+		else
+		{
+			if (eFlag == 0 && recvAudioTmpBuf[IndexNum] == 0)
+			{
+				IndexNum++;
+				index_0++;
+				TransBufToData();
+			}
+			else if (eFlag == 0 && recvAudioTmpBuf[IndexNum] == 1)
+			{
+				int park1 = 0;
+				int park2 = 0;
+				park1 = index_0 / GAP;
+				park2 = index_0 % GAP;
+				if (park1 == 0)
+				{
+					park1 = 1;
+				}	
+				else if (park1 > 15 && park1 < 25)
+				{
+					park1 = park1 - 1; 
+				}
+				else if (park1 >= 25)
+				{
+					park1 = park1 - 2;
+				}				
+				
+				if (park2 > 8)
+				{
+					park1 = park1+1;
+				}		
+				
+				for (int i = 0; i < park1; i++)
+				{
+					audioDataBuf[indexPub] = 0;
+					indexPub++;
+				}
+				
+				eFlag = 4;
+				IndexNum++;
+				
+				index_0 = 1;
+				TransBufToData();
+			}
+			else if (eFlag == 1 && recvAudioTmpBuf[IndexNum] == 1)
+			{
+				IndexNum++;
+				index_1++;
+				TransBufToData();	
+			}
+			else if (eFlag == 1 && recvAudioTmpBuf[IndexNum] == 0)
+			{
+				int park1 = 0;
+				int park2 = 0;
+				park1 = index_1 / GAP;
+				park2 = index_1 % GAP;
+				if (park1 == 0)
+				{
+					park1 = 1;
+				}		
+				else if (park1 > 15 && park1 < 25)
+				{
+					park1 = park1 - 1; 
+				}
+				else if (park1 >= 25)
+				{
+					park1 = park1 - 2;
+				}
+				
+				if (park2 > 8)
+				{
+					park1 = park1+1;
+				}
+
+				for (int i = 0; i < park1; i++)
+				{
+					audioDataBuf[indexPub] = 1;
+					indexPub++;
+				}				
+
+				eFlag = 4;
+				IndexNum++;
+				index_1 = 1;
+				TransBufToData();
+			}
+		}
+	}
+	else
+	{
+		if (index_0 > 1)
+		{
+				int park1 = 0;
+				int park2 = 0;
+				park1 = index_0 / GAP;
+				park2 = index_0 % GAP;
+				if (park1 == 0)
+				{
+					park1 = 1;
+				}
+				else if (park1 > 15 && park1 < 25)
+				{
+					park1 = park1 - 1; 
+				}		
+				else if (park1 >= 25)
+				{
+					park1 = park1 - 2;
+				}
+				
+				if (park2 > 8)
+				{
+					park1 = park1+1;
+				}
+				
+				for (int i = 0; i < park1; i++)
+				{
+					audioDataBuf[indexPub] = 0;
+					indexPub++;
+				}
+		}
+		else if (index_1 > 1)
+		{
+				int park1 = 0;
+				int park2 = 0;
+				park1 = index_1 / GAP;
+				if (park1 == 0)
+				{
+					park1 = 1;
+				}	
+				else if (park1 > 15 && park1 < 25)
+				{
+					park1 = park1 - 1; 
+				}				
+				else if (park1 >= 25)
+				{
+					park1 = park1 - 2;
+				}
+				
+				
+				if (park2 > 8)
+				{
+					park1 = park1+1;
+				}		
+				
+				for (int i = 0; i < park1; i++)
+				{
+					audioDataBuf[indexPub] = 1;
+					indexPub++;
+				}
+		}
+		eFlag = 4;
+		
+		printf("indexPub = %d\n\r",indexPub);
+		//printf("recvAudioBuf size is %d\n\r",sizeof(recvAudioBuf));
+		for (int i = 0; i < indexPub; i++)
+		{
+			printf("audioDataBuf[%d] = %d\n\r",i,audioDataBuf[i]);
+		}
+		
+		if (indexPub < 28 || indexPub > 110)
+		{
+			memset(recvAudioTmpBuf, 0, recvIndexMax);
+			memset(audioDataBuf,0,indexPub);
+			index_0 = 1;
+			index_1 = 1;
+			indexPub = 0;
+			IndexNum = 0;
+			dataRecvFlag = 0;
+		}
+		else
+		{
+			ByteDest[0] = ChangeBitToByte(&audioDataBuf[0]);
+			ByteDest[1] = ChangeBitToByte(&audioDataBuf[8]);
+			ByteDest[2] = ChangeBitToByte(&audioDataBuf[16]);
+			ByteDest[3] = ChangeBitToByte(&audioDataBuf[24]);
+
+//			ByteDest[4] = ChangeBitToByte(&audioDataBuf[32]);
+//			ByteDest[5] = ChangeBitToByte(&audioDataBuf[40]);
+//			ByteDest[6] = ChangeBitToByte(&audioDataBuf[48]);
+//			ByteDest[7] = ChangeBitToByte(&audioDataBuf[56]);
+//			
+//			ByteDest[8] = ChangeBitToByte(&audioDataBuf[64]);
+//			ByteDest[9] = ChangeBitToByte(&audioDataBuf[72]);
+//			ByteDest[10] = ChangeBitToByte(&audioDataBuf[80]);
+//			ByteDest[11] = ChangeBitToByte(&audioDataBuf[88]);			
+				
+			TransByteToFloat(ByteDest,&floatDest);
+//			TransByteToFloat(&ByteDest[4],&floatDest1);
+//			TransByteToFloat(&ByteDest[8],&floatDest2);
+				printf("-1-floatDest = %f floatDest1 = %f floatDest2 = %f\n\r",floatDest,floatDest1,floatDest2);
+
+//				ByteDest[0] = ChangeBitToByte(&audioDataBuf[0]);
+//				ByteDest[1] = ChangeBitToByte(&audioDataBuf[8]);
+//				ByteDest[2] = ChangeBitToByte(&audioDataBuf[16]);
+//				ByteDest[3] = ChangeBitToByte(&audioDataBuf[24]);
+
+//				ByteDest[4] = ChangeBitToByte(&audioDataBuf[33]);
+//				ByteDest[5] = ChangeBitToByte(&audioDataBuf[41]);
+//				ByteDest[6] = ChangeBitToByte(&audioDataBuf[49]);
+//				ByteDest[7] = ChangeBitToByte(&audioDataBuf[57]);
+//				
+//				ByteDest[8] = ChangeBitToByte(&audioDataBuf[65]);
+//				ByteDest[9] = ChangeBitToByte(&audioDataBuf[73]);
+//				ByteDest[10] = ChangeBitToByte(&audioDataBuf[81]);
+//				ByteDest[11] = ChangeBitToByte(&audioDataBuf[89]);			
+//					
+//				TransByteToFloat(ByteDest,&floatDest);
+//				TransByteToFloat(&ByteDest[4],&floatDest1);
+//				TransByteToFloat(&ByteDest[8],&floatDest2);
+//				printf("-2-floatDest = %f floatDest1 = %f floatDest2 = %f\n\r",floatDest,floatDest1,floatDest2);
+
+//					ByteDest[0] = ChangeBitToByte(&audioDataBuf[0]);
+//					ByteDest[1] = ChangeBitToByte(&audioDataBuf[8]);
+//					ByteDest[2] = ChangeBitToByte(&audioDataBuf[16]);
+//					ByteDest[3] = ChangeBitToByte(&audioDataBuf[24]);
+
+//					ByteDest[4] = ChangeBitToByte(&audioDataBuf[32]);
+//					ByteDest[5] = ChangeBitToByte(&audioDataBuf[40]);
+//					ByteDest[6] = ChangeBitToByte(&audioDataBuf[48]);
+//					ByteDest[7] = ChangeBitToByte(&audioDataBuf[56]);
+//					
+//					ByteDest[8] = ChangeBitToByte(&audioDataBuf[65]);
+//					ByteDest[9] = ChangeBitToByte(&audioDataBuf[73]);
+//					ByteDest[10] = ChangeBitToByte(&audioDataBuf[81]);
+//					ByteDest[11] = ChangeBitToByte(&audioDataBuf[89]);			
+//						
+//					TransByteToFloat(ByteDest,&floatDest);
+//					TransByteToFloat(&ByteDest[4],&floatDest1);
+//					TransByteToFloat(&ByteDest[8],&floatDest2);
+
+//				printf("-3-floatDest = %f floatDest1 = %f floatDest2 = %f\n\r",floatDest,floatDest1,floatDest2);
+//	
+		
+			memset(recvAudioTmpBuf, 0, sizeof(u32) * recvIndexMax);
+			memset(audioDataBuf,0,sizeof(uint32_t) * indexPub);
+			memset(ByteDest,0,sizeof(u8) * 12);
+			floatDest = 0;
+			floatDest1 = 0;
+			floatDest2 = 0;
+			index_0 = 1;
+			index_1 = 1;
+			indexPub = 0;
+			IndexNum = 0;
+			dataRecvFlag = 0;
+		}
+	}
+}
+
+

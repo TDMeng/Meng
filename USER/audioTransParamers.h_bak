@@ -1,0 +1,13 @@
+#ifndef _AUDIOTRANSPARAMERS_H
+#define _AUDIOTRANSPARAMERS_H
+#include "sys.h"
+#include "usart.h"
+#include "recorder.h"
+#include "string.h"
+#include "list.h"
+
+u8 ChangeBitToByte(u32 *src);
+void TransByteToFloat(u8 *srcByte, float *destFloat);
+void TransBufToData(void);
+void AudioTransDataProcess(void);
+#endif

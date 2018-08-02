@@ -1,0 +1,364 @@
+#include "sys.h"
+#include "delay.h"
+#include "usart.h"
+#include "wm8978.h"	 
+#include "recorder.h"
+#include "led.h"
+#include "nfc.h"
+#include "AudioFilter.h"
+#include "button.h"
+
+
+extern UART_HandleTypeDef UART2_Handler;;
+	
+u8 sairecbuf1[SAI_RX_DMA_BUF_SIZE];
+u8 sairecbuf2[SAI_RX_DMA_BUF_SIZE];
+u8 saiplaybuf1[SAI_RX_DMA_BUF_SIZE];
+u8 saiplaybuf2[SAI_RX_DMA_BUF_SIZE];
+
+uint32_t orderFlag = 0;
+uint32_t processFlag = 0;
+	
+typedef enum
+{
+	DEVICE_WORK_NOFLITER = 0,
+	DEVICE_WORK_CONFIGURATION,
+	DEVICE_WORK_WITH_FLITER,
+	DEVICE_WORK_ERROR
+}DEVICE_WORK_MODE;
+	
+
+int16_t tempInt;
+__int64 tempFloatLeft;
+__int64 tempFloatRight;
+int ptr2;
+int j;
+	
+u8 intFlag = 0;
+uint32_t WorkMode = DEVICE_WORK_NOFLITER;
+
+int16_t temp1;
+int16_t temp2;
+int32_t printfFlag = 0;
+
+void apps(void);
+void updataFliterParamer(void);
+void updataFliterParamerTest(int *leftBuffer, int *rightBuffer);
+void AudioProcessWithFliter(void);
+void AudioProcessWithoutFliter(void);
+void Toggle_Leds(int led);
+void ButtonStatus(void);
+
+__IO uint32_t UserButtonStatus = 0;  /* set to 1 after User Button interrupt  */
+
+int main(void)
+{ 
+	/*system init*/
+	Cache_Enable();            
+  HAL_Init();			
+  Stm32_Clock_Init(432,25,2,9); 
+	
+	/*user init*/
+  delay_init(216); 
+	LED_Init();	
+	uart_init(9600);	
+	NFC_init();	
+  WM8978_Init();		
+
+	/*audio process function*/
+	wav_recorder();
+	
+  /* Configure User push-button in Interrupt mode */
+  Button_Init(BUTTON_USER, BUTTON_MODE_EXTI);
+
+	ptr = 0;		
+	
+	AL_mLeftSumFilter = 0;
+	AL_mRightSumFilter = 0;
+	for(int i = 0; i < SIZE_OF_SUM_FILTER_256; i++)
+	{
+			AL_mLeftSumFilter += abs(gLeftSumFilter[i]);
+			AL_mRightSumFilter += abs(gRightSumFilter[i]);
+	}
+	
+	while(1)
+	{ 	
+		apps();
+	} 
+}
+
+void ButtonStatus(void)
+{
+		if (UserButtonStatus == 0)
+		{
+			WorkMode = DEVICE_WORK_NOFLITER;
+		}
+		else
+		{
+			WorkMode = DEVICE_WORK_CONFIGURATION;
+		}
+}
+
+/*
+void apps(void)
+{
+	switch(WorkMode)
+	{
+		case DEVICE_WORK_NOFLITER:
+			LED0(1);
+			AudioProcessWithoutFliter();
+			break;
+		case DEVICE_WORK_CONFIGURATION:
+			//Toggle_Leds(0);
+		  memset(saiplaybuf1,0,SAI_RX_DMA_BUF_SIZE);
+			memset(saiplaybuf2,0,SAI_RX_DMA_BUF_SIZE);
+			NFC_MsgProcess();
+			if (fliterChangeFlag == 1)
+			{
+				updataFliterParamer();
+				fliterChangeFlag = 0;
+				recvMsgFlag = 0;
+				phoneFindFlag = 0;
+				phoneCardFlag = 0;
+				WorkMode = DEVICE_WORK_WITH_FLITER;
+				LED0(0);
+			}
+			break;
+		case DEVICE_WORK_WITH_FLITER:
+			//Toggle_Leds(1);
+			AudioProcessWithFliter();
+			break;
+		default:
+			break;
+	}
+}
+*/
+
+void apps(void)
+{
+	switch(WorkMode)
+	{
+		case DEVICE_WORK_NOFLITER:
+			LED0(1);
+			AudioProcessWithoutFliter();
+			break;
+		case DEVICE_WORK_CONFIGURATION:
+			AudioProcessWithFliter();
+			break;
+		default:
+			break;
+	}
+}
+
+
+/*
+* separate NFC recv paramer to left and right filter buffer and caculate the abs
+*/
+void updataFliterParamer(void)
+{
+	uint32_t i = 0, j = 0, k = 0;
+	
+	for(k = 0; k < (FLITERBUFFERINDEX / 2); k++)
+	{
+		for (j = 0; j < FLITERPARAMERSIZE; j++)
+		{
+			gLeftSumFilter[i] = fliterParameter_Int[k][j];
+			i++;
+		}
+	}
+	
+	for(k = 8, i = 0; k < FLITERBUFFERINDEX; k++)
+	{
+		for (j = 0; j < FLITERPARAMERSIZE; j++)
+		{
+			gRightSumFilter[i] = fliterParameter_Int[k][j];
+			i++;
+		}
+	}
+	
+	AL_mLeftSumFilter = 0;
+	AL_mRightSumFilter = 0;
+	for(int i = 0; i < SIZE_OF_SUM_FILTER_256; i++)
+	{
+			AL_mLeftSumFilter += abs(gLeftSumFilter[i]);
+			AL_mRightSumFilter += abs(gRightSumFilter[i]);
+	}
+}
+
+
+/**
+  * @brief EXTI line detection callbacks
+  * @param GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == WAKEUP_BUTTON_PIN)
+  {  
+		if (WorkMode == DEVICE_WORK_NOFLITER)
+		{
+			WorkMode = DEVICE_WORK_CONFIGURATION;
+		}
+		else
+		{
+			WorkMode = DEVICE_WORK_NOFLITER;
+		}
+    
+  }
+}
+
+void AudioProcessWithFliter(void)
+{
+		if(intFlag&0x01)
+		{
+			ptr = 0;
+			while(ptr<(SAI_RX_DMA_BUF_SIZE)){
+				
+				tempInt = (sairecbuf1[ptr+1]<<8) & 0xff00;
+				tempInt |= sairecbuf1[ptr]&0x00ff;
+				
+				temp1 = tempInt;
+				float_left[store_ptr]=tempInt;
+			
+				tempInt = (sairecbuf1[ptr+3]<<8)&0xff00;
+				tempInt |= sairecbuf1[ptr+2]&0x00ff;
+				temp2 = tempInt;
+				float_right[store_ptr]=tempInt;
+				
+				tempFloatLeft = convolution(float_left, gLeftSumFilter, store_ptr);
+				tempFloatRight = convolution(float_right, gRightSumFilter, store_ptr);
+				
+	
+				tempFloatLeft = CompFactor * tempFloatLeft / AL_mLeftSumFilter;
+				
+				tempFloatRight =  CompFactor * tempFloatRight / AL_mRightSumFilter;
+				
+				tempInt = (int16_t)(tempFloatLeft);
+					
+				saiplaybuf1[ptr+1] =(u8)((tempInt>>8)&0x00FF);
+				saiplaybuf1[ptr] = (u8)((tempInt)&0x00FF);
+				
+				tempInt = (int16_t)(tempFloatRight);
+				
+				saiplaybuf1[ptr+3] = (u8)((tempInt>>8)&0x00FF);
+				saiplaybuf1[ptr+2] = (u8)((tempInt)&0x00FF);
+
+				store_ptr = (store_ptr+1)&(HISTORY_NUM - 1);
+				
+				ptr+=4;
+			}
+			intFlag&=0xFE;
+	
+		}
+	
+		//Process the second part of Data
+		if(intFlag&0X04)
+		{
+			
+			ptr = 0;
+			while(ptr<(SAI_RX_DMA_BUF_SIZE)){
+				
+				tempInt = (sairecbuf2[ptr+1]<<8)&0xff00;
+				tempInt |= sairecbuf2[ptr]&0x00ff;
+				temp1 = tempInt;
+				float_left[store_ptr]=tempInt;
+			
+				tempInt = (sairecbuf2[ptr+3]<<8)&0xff00;
+				tempInt |= sairecbuf2[ptr+2]&0x00ff;
+				temp2 = tempInt;
+				float_right[store_ptr]=tempInt;
+
+
+
+	
+				tempFloatLeft = convolution(float_left, gLeftSumFilter, store_ptr);
+				tempFloatRight = convolution(float_right, gRightSumFilter, store_ptr);
+
+				
+				
+				tempFloatLeft = CompFactor * tempFloatLeft / AL_mLeftSumFilter;
+				
+				tempFloatRight =  CompFactor * tempFloatRight / AL_mRightSumFilter;
+
+				tempInt = (int16_t)(tempFloatLeft);
+					
+				saiplaybuf2[ptr+1] = (u8)((tempInt>>8)&0x00FF);
+				saiplaybuf2[ptr] = (u8)((tempInt)&0x00FF);
+				
+				tempInt = (int16_t)(tempFloatRight);
+
+				saiplaybuf2[ptr+3] =(u8)( (tempInt>>8)&0x00FF);
+				saiplaybuf2[ptr+2] =(u8)( (tempInt)&0x00FF);
+				
+				store_ptr = (store_ptr+1)&(HISTORY_NUM - 1);
+		
+				ptr+=4;
+			}
+			intFlag&=0xFB;
+			
+		}
+
+}
+
+void AudioProcessWithoutFliter(void)
+{
+		if(intFlag&0x01)
+		{
+
+			ptr = 0;
+			while(ptr<(SAI_RX_DMA_BUF_SIZE)){
+				
+				saiplaybuf1[ptr] = sairecbuf1[ptr];
+				saiplaybuf1[ptr+1] = sairecbuf1[ptr+1];
+				saiplaybuf1[ptr+2] = sairecbuf1[ptr+2];
+				saiplaybuf1[ptr+3] = sairecbuf1[ptr+3];
+				ptr+=4;
+			}
+			intFlag&=0xFE;
+	
+		}
+	
+		//Process the second part of Data
+		if(intFlag&0X04)
+		{
+			
+			ptr = 0;
+			while(ptr<(SAI_RX_DMA_BUF_SIZE)){
+				
+				saiplaybuf2[ptr] = sairecbuf2[ptr];
+				saiplaybuf2[ptr+1] = sairecbuf2[ptr+1];
+				saiplaybuf2[ptr+2] = sairecbuf2[ptr+2];
+				saiplaybuf2[ptr+3] = sairecbuf2[ptr+3];
+		
+				ptr+=4;
+			}
+			intFlag&=0xFB;
+			
+		}
+}
+
+/**
+  * @brief  Toggle LEDs to show user input state.   
+  * @param  None
+  * @retval None
+  */
+void Toggle_Leds(int led)
+{
+  static uint32_t ticks;
+  
+  if(ticks++ == 0xfffff)
+  {
+		if(led == 0)
+		{
+			LED0_Toggle;
+		}
+		else
+		{
+			LED1_Toggle;
+		}
+    
+    ticks = 0;
+  }
+}
+
+

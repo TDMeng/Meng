@@ -1,0 +1,30 @@
+#ifndef _LIST_H
+#define _LIST_H
+#include "sys.h"
+#include "string.h"
+#include "stdlib.h"
+#include "audioTransParamers.h"
+
+typedef struct Node
+{
+	uint32_t member;
+	struct Node *pNext;
+}NODE,*pNODE;
+
+typedef struct Part
+{
+	uint32_t member;
+	//uint32_t index;
+}PART;
+
+//pNODE CreatList(void);
+
+////int InsertNode(pNODE pHead,int num,int data);
+//void DelNode(pNODE NodeHead, int num);
+
+void ListerInit(void);
+pNODE CreateNode(int num);
+void ProcessDataStream(uint32_t data);
+void ListersInit(void);
+#endif
+

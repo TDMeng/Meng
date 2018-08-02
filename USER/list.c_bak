@@ -1,0 +1,278 @@
+#include "list.h"
+
+#define TAIL 5
+
+uint32_t nodeIndex = 0; 
+extern pNODE Lister[5];
+
+extern PART listers[5];
+extern u32 beginFlag;
+extern u32 endFlag;
+extern u32 transFlag;
+
+extern u32 *recvAudioBuf;
+extern u32 recvIndex;
+extern u32 recvIndexMax;
+u32 count = 0;
+u32 *recvAudioTmpBuf;
+
+extern int32_t alIndex;
+extern int64_t *alTmpbuf;
+extern int IndexNum;
+u32 dataFlag = 0;
+
+extern u32 dataRecvFlag;
+extern uint64_t dataRecvMaxSample;
+extern uint64_t dataRecvMidSample;
+
+//pNODE CreatList(void)
+//{
+//	pNODE pHead = (pNODE)malloc(sizeof(pNODE));
+//	if(NULL == pHead)
+//	{
+//		return NULL;
+//	}
+//	memset(pHead, 0, sizeof(pHead));
+//	pHead->pNext = NULL;
+//	return pHead;
+//}
+
+//int InsertNode(pNODE pHead,int num,int data)
+//{
+////	pNODE p = pHead;
+////	pNODE p1 = (pNODE)malloc(sizeof(pNODE));
+////	if (NULL == p1)
+////	{
+////		return 1;
+////	}
+////	
+////	if (num == 0)
+////	{
+////		if(pHead == NULL)
+////		{
+////			pHead = p1;
+////		}
+////		else
+////		{
+////			pHead->pNext = p1;
+////		}
+////	}
+////	else if(num == 5)
+////	{
+////		
+////	}
+//	pNODE p = (pNODE)malloc(sizeof(pNODE));
+//	
+//	
+//}
+
+//pNODE CreateNode(int num)
+//{
+//	pNODE Lp = (pNODE)malloc(sizeof(pNODE));
+//	if (Lp == NULL)
+//	{
+//		pNODE Lp = (pNODE)malloc(sizeof(pNODE));
+//		printf("NO SPACE\n\r");
+//		return NULL;
+//	}
+//	
+//	Lp->member = num;
+//	Lp->pNext = NULL;
+//	return Lp;
+//}
+
+//void ContactNodesToLister(void)
+//{
+//	for (int i = 0; i < 5; i++)
+//	{
+//		
+//	}
+//}
+
+//void ListerInit(void)
+//{
+//	printf("Lister's size is %d\n\r",sizeof(Lister));
+//	for (int i = 0; i < 5; i++)
+//	{
+//		Lister[i]->member = i;
+//		printf("Lister[%d] = %d\n\r",i,Lister[i]->member);
+////		if (i < 4)
+////		{
+////			Lister[i]->pNext = Lister[i+1];
+////		}
+//	}
+
+//	for (int i = 0; i < 4; i++)
+//	{
+//		printf("Lister[%d] = %d\n\r",i,Lister[i]->member);
+////		printf("Lister[%d] ->next = %d\n\r",i,Lister[i]->pNext->member);
+//	}
+//}
+
+void ListersInit(void)
+{
+	for(int i = 0; i < 5; i++)
+	{
+		listers[i].member = i;
+	}	
+}
+
+//{0,0,0,0,0,5,5,5,1,1,1,0,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,0,1,0,1,1,1,1,0,0,0,1,1,1,1,1,0,0,0,5,5,5,5,5,0,0};
+void ProcessDataStream(uint32_t data)
+{
+//	printf("------data = %d------\n\r",data);
+	
+	if (nodeIndex < 4)
+	{
+		listers[nodeIndex].member = data;
+		nodeIndex++;
+	}
+	else
+	{
+		listers[nodeIndex].member = data;
+		nodeIndex = 0;
+	}
+	
+	if (data == 5 && beginFlag == 0)
+	{
+		beginFlag = 2;
+		count++;
+	}
+	else if (beginFlag == 2 && data == 5)
+	{
+		count++;
+	}
+	else if (data != 5 &&  beginFlag == 2)
+	{
+		if (count < 5)
+		{
+			printf("head is short!\n\r");
+			dataRecvFlag = 0;
+			beginFlag = 0;
+		}
+		else
+		{
+			printf("beginFlag count = %d\n\r",count);
+			beginFlag = 1;
+			endFlag = 0;
+			count = 0;		
+		}
+	}
+	
+	if (beginFlag == 1 && endFlag == 0 && data != 5)
+	{
+//		printf("data = %d\n\r",data);
+		recvAudioBuf[recvIndex] = data;
+		recvIndex++;
+	}
+	
+	if (beginFlag == 1 && data == 5 && endFlag == 0)
+	{
+		endFlag = 2;
+		count++;
+	}
+	else if (endFlag == 2 && data == 5)
+	{
+		count++;
+	}
+	else if(endFlag == 2 && data != 5)
+	{
+		if(count < 1)
+		{
+			printf("end is short count = %d\n\r",count);
+			endFlag = 0;
+			count = 0;
+			beginFlag = 0;
+			dataRecvFlag = 0;
+			memset(recvAudioBuf, 0, recvIndex-1);
+			recvIndex = 0;			
+		}
+		else
+		{
+			printf("end flag count = %d\n\r",count);
+			endFlag = 1;
+		}
+	}
+	else if (endFlag == 1 & data != 5)
+	{
+		recvIndexMax = recvIndex - 1;
+		
+		if (recvAudioBuf[10] == 1)
+		{
+			dataFlag = 1;
+		}
+		else
+		{
+			dataFlag = 2;
+		}
+		
+		if (dataFlag == 1)
+		{
+			for (int i = 5; i < recvIndexMax; i++)
+			{
+				if (recvAudioBuf[i] == 0)
+				{
+					IndexNum = i;
+					dataFlag = 0;
+					break;
+				}
+			}		
+		}	
+		else if (dataFlag == 2)
+		{
+			for (int i = 5; i < recvIndexMax; i++)
+			{
+				if (recvAudioBuf[i] == 1)
+				{
+					IndexNum = i;
+					dataFlag = 0;
+					break;
+				}
+			}		
+		}		
+		
+		printf("recvIndexMax = %d IndexNum = %d\n\r",recvIndexMax,IndexNum);
+//		for(int i = 0; i < recvIndexMax; i++)
+//		{
+//			printf("recvAudioBuf[%d] = %d\n\r",i,recvAudioBuf[i]);
+//		}	
+		for (int j = 0; j < recvIndexMax-IndexNum-1; j++)
+		{
+			recvAudioTmpBuf[j] = recvAudioBuf[j + IndexNum];
+		}
+
+
+		
+//		memset(recvAudioBuf, 0, recvIndexMax);
+		recvIndexMax = recvIndexMax - IndexNum - 1;
+		IndexNum = 0;
+
+		printf("recvIndexMax = %d IndexNum = %d\n\r",recvIndexMax,IndexNum);
+		for (int j = 0; j < recvIndexMax;j++ )
+		{
+			printf("recvAudioTmpBuf[%d] = %d\n\r",j,recvAudioTmpBuf[j]);
+		}
+		TransBufToData();
+		printf("--------------end-------------\n\r");
+		count = 0;
+		endFlag = 0;
+		beginFlag = 0;
+		recvIndex = 0;
+		
+		dataFlag = 0;
+		dataRecvFlag = 0;
+		dataRecvMaxSample = 0;
+		dataRecvMidSample = 0;
+
+	}
+	
+}
+
+//void ProcessDataStream(uint32_t data)
+//{
+//}
+
+
+void DelNode(pNODE NodeHead, int num);
+
+
