@@ -2,7 +2,6 @@
 #include "env.h"
 #include "libg.h"
 #include "button.h"
-//#include "main.h"
 
 extern uint32_t WorkMode;
 
@@ -76,7 +75,7 @@ int env_get(float *data, int len)
 	for(i = 0; i < len; i++)
   {
     data[i]  = *(__IO uint32_t *)Address;
-		libg_log_debug("%u read : %f\n", Address, data[i]);
+//		libg_log_debug("%u read : %f\n", Address, data[i]);
     Address = Address + 4;
   }
 
@@ -91,7 +90,6 @@ int env_set(float *data, int len)
 	uint32_t SectorError;
 
 	uint32_t Address = FLASH_USER_START_ADDR;
-	printf("[env_set-----]Address = %d\n\r",Address);
   HAL_FLASH_Unlock();
 
   FirstSector = GetSector(FLASH_USER_START_ADDR);
@@ -111,11 +109,10 @@ int env_set(float *data, int len)
 
 	for(int i = 0; i < len; i++)
   {
-		libg_log_debug("[env_set]%u write : %f\n", Address, data[i]);
+//		libg_log_debug("[env_set]%u write : %f\n", Address, data[i]);
     if(HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, Address, data[i]) == HAL_OK)
     {
       Address = Address + 4;
-			//printf("[env_set]Address = %d\n\r",Address);		
     }
 		else
     {

@@ -74,76 +74,39 @@ uint64_t dataRecvMaxSample = 0;
 uint64_t dataRecvMidSample = 0;
 int8_t ByteDest[4];
 float filterParamers[6] = {0};
-float ParamerData[8] = {0};//{0,0,0,0,5,10,20,20};;
+float ParamerData[8] = {0};
 float defaultParams[8] = {0,0,0,0,5,10,20,20};
+float envBuffer[9] = {0};
 bool filterChangeFlag1 = FALSE;
 
 int ParamersUpdataFlag = 0;
 
 u32 longkey = 0;
 
-#define _ON 0
-#define _OFF 1
-#define _SHORTKEY 0
-#define _LONGKEY 1
-#define _KEYNULL 2
-
 u32 keybuf = 0;
 u32 key_handle = 0;
 u32 key_status = 0;
 
-u32 button_status = 0;
+u32 button_status = BUTTON_STATUS_DEFAULT;
 
 /*
 * main function
 */
 int main(void)
 {
-//	float data[10];
-//	float rdata[10];
-	
 	SystemAndHardwareInit();
-	preScale = pow(10, -STD_LESS_DB * 0.05);
 	getDefaultFilterParamer();
+	caculatePreScale();
 	FliterInit();
 	printf("HELLO INCUS!\n\r");
 	
-	//env_test();
-//	for (int i = 0; i < 10; i++)
-//	{
-//		data[i] = i + 1;
-//	}
-//	env_get(rdata, 10);
-//	printf("-----------------------\n\r");
-//	env_set(data, 10);
-//	env_get(rdata, 10);
-//	while (1)
-//	{
-//		if (WorkMode == DEVICE_WORK_CONFIGURATION)
-//		{
-//			env_get(rdata, 10);
-////			for (int i = 0;i < 10;i++)
-////			{
-////				printf("rdata[%d] = %d\n\r",i,rdata[i]);
-////			}
-//		}
-//		else
-//		{
-//			//printf("WorkMode = %d\n\r",WorkMode);
-//			for (int i = 0; i < 10; i++)
-//			{
-//				data[i] = (i+1) * 10;
-//			}
-//			env_set(data, 10);
-//			delay_ms(3000);
-//			WorkMode = DEVICE_WORK_CONFIGURATION;
-//		}
-//	}
 	while (1)
 	{
-		//printf("WorkMode is %d\n\r",WorkMode);
+		if (button_status == 0)
+		{
+			apps();
+		}
 		scan_Key();
-		apps();
 	}
 }
 
@@ -167,12 +130,29 @@ void SystemAndHardwareInit(void)
   Button_Init();
 }
 
+/*
+caculate the prescale
+*/
+void caculatePreScale(void)
+{
+	preScale = pow(10, -STD_LESS_DB * 0.05);
+}
 
+/*
+get default filter paramers from e2prom
+if envBuffer[8] != 1 means the first use of the device ,we chose the system default paramers.
+else we chose the last paramers for filter creating
+*/
 void getDefaultFilterParamer(void)
 {
-	for (int i = 0; i < 8; i++)
+	env_get(envBuffer,9);
+	if (envBuffer[8] == 1)
 	{
-		ParamerData[i] = defaultParams[i];
+		memcpy(ParamerData, envBuffer, 8 * sizeof(float));
+	}
+	else
+	{
+		memcpy(ParamerData, defaultParams, 8 * sizeof(float));
 	}
 }
 
@@ -181,8 +161,6 @@ void getDefaultFilterParamer(void)
 */
 void FliterInit(void)
 {
-	//updataFliterParamer();
-
 	eqfilter(NUM_TAPS, SampleRate, banks, ParamerData, 8, l2l);
 	arm_copy_f32(l2l, r2r, NUM_TAPS);
 	
@@ -197,7 +175,7 @@ void FliterInit(void)
   arm_fir_init_f32(&SR, NUM_TAPS, (float *)&r2r[0], &rFirStateF32[0], blockSize);
 
 	getVolumeDifference();
-	SetCodecVolume(63,63);
+	//SetCodecVolume(63,63);
 }
 
 /*
@@ -205,17 +183,18 @@ void FliterInit(void)
 */
 void getVolumeDifference(void)
 {
-	double beforeEnergy = 0;
-	
-	double afterEnergy = 0;
 
-	for(int i = 0; i < 40; i++)
+	float maxVol = 0.0f;
+	gVolumeRatio = 1.0f;
+
+	for(int i = 0; i < 64; i++)
 	{
+		
 		for(int j = 0; j < blockSize; j ++)
 		{
-			tempFloat = (float)WHITE[i * blockSize + j];
+			tempFloat = WHITE[i * blockSize + j] * preScale;
 			float_left[j] = tempFloat;
-			beforeEnergy += pow(tempFloat, 2);
+			
 		}
 		
 		arm_fir_f32(&SL, lInputF32, lOutputF32, blockSize);
@@ -224,10 +203,17 @@ void getVolumeDifference(void)
 		for(int j = 0; j < blockSize; j++)
 		{
 			tempFloat = float_left_output[j];
-			afterEnergy += pow(tempFloat, 2);
+			if(maxVol < abs(tempFloat))
+			{
+				maxVol = abs(tempFloat);
+			}
 		}
 	}
-	gVolumeRatio = (float)sqrt(beforeEnergy  / afterEnergy);
+	
+	if(maxVol > INT16_MAX)
+	{		
+		gVolumeRatio = INT16_MAX *1.0f / maxVol;
+	}
 }
 
 /*
@@ -241,6 +227,8 @@ void updataFliterParamer(void)
 	}
 	ParamerData[0] = ParamerData[1];
 	ParamerData[7] = ParamerData[6];
+	memcpy(envBuffer, ParamerData, 8 * sizeof(float));
+	envBuffer[8] = 1;
 }
 
 /*
@@ -268,9 +256,8 @@ void apps(void)
 			if (filterChangeFlag1 == TRUE)
 			{
 				updataFliterParamer();
-				env_set(ParamerData, 8);
+				env_set(envBuffer, 9);
 				ParamersUpdataFlag = 1;
-				printf("ParamersUpdataFlag = %d\n\r",ParamersUpdataFlag);
 				FliterInit();
 				filterChangeFlag1 = FALSE;
   			WorkMode = DEVICE_WORK_WITH_FLITER;
@@ -278,7 +265,7 @@ void apps(void)
 			}
 			break;
 		case DEVICE_WORK_WITH_FLITER:
-			LED0(0);
+			LED0(1);
 			LED1(1);
 			AudioProcessWithFliter();
 			break;
@@ -287,7 +274,6 @@ void apps(void)
 			LED0(1);
 			if (ParamersUpdataFlag == 1)
 			{
-				printf("using updata paramers\n\r");
 				env_get(ParamerData,8);
 				FliterInit();
 				ParamersUpdataFlag = 0;
@@ -299,6 +285,9 @@ void apps(void)
 	}
 }
 
+/*
+Trans audio data direct
+*/
 void AudioProcessWithoutFliter(void)
 {
 		if(intFlag&0x01)
@@ -345,11 +334,12 @@ void AudioProcessWithoutFliter(void)
 				ptr+=4;
 			}
 			intFlag&=0xFB;
-			
 		}
 }
 
-
+/*
+Trans audio data with customized filter
+*/
 void AudioProcessWithFliter(void)
 {
 		//Process the first part of Data
@@ -456,6 +446,9 @@ void Toggle_Leds(int led)
   }
 }
 
+/*
+Set the CODEC volum
+*/
 void SetCodecVolume(uint32_t leftVol, uint32_t rightVol)
 {
 	WM8978_HPvol_Set(leftVol,rightVol);
@@ -468,50 +461,54 @@ void SetCodecVolume(uint32_t leftVol, uint32_t rightVol)
   */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-//  if(GPIO_Pin == WAKEUP_BUTTON_PIN)
-//  {  
-//		if (WorkMode == DEVICE_WORK_NOFLITER)
-//		{
-//			dataRecvFlag = 0;
-//			WorkMode = DEVICE_WORK_CONFIGURATION;
-//		}
-//		else
-//		{
-//			WorkMode = DEVICE_WORK_NOFLITER;
-//		}
-//		//key_status = 1;
-//  }
+#if 0
+  if(GPIO_Pin == WAKEUP_BUTTON_PIN)
+  {  
+		if (WorkMode == DEVICE_WORK_NOFLITER)
+		{
+			dataRecvFlag = 0;
+			WorkMode = DEVICE_WORK_CONFIGURATION;
+		}
+		else
+		{
+			WorkMode = DEVICE_WORK_NOFLITER;
+		}
+		//key_status = 1;
+  }
+#endif	
 	if (GPIO_Pin == WAKEUP_BUTTON_PIN)
 	{
-		memset(saiplaybuf1,0,SAI_RX_DMA_BUF_SIZE);
-		memset(saiplaybuf2,0,SAI_RX_DMA_BUF_SIZE);	
-		if (button_status == 0)
+		if (button_status == BUTTON_STATUS_DEFAULT)
 		{
-			button_status = 1;
+			button_status = BUTTON_STATUS_RISING;
 		}
-		else if (button_status == 1)
+		else if (button_status == BUTTON_STATUS_RISING)
 		{
-			button_status = 2;
+			button_status = BUTTON_STATUS_FALLING;
 		}
 	}
 }
 
+/*
+Check the keys status and change the device mode 
+if the longkey < 100 means short key action
+if the longkey > 100 means long key action
+*/
 void scan_Key(void)
 {
-	if (button_status == 1)
+	if (button_status == BUTTON_STATUS_RISING)
 	{
 		memset(saiplaybuf1,0,SAI_RX_DMA_BUF_SIZE);
 		memset(saiplaybuf2,0,SAI_RX_DMA_BUF_SIZE);		
 		longkey++;
 		delay_ms(5);		
 	}
-	else if (button_status == 2)
+	else if (button_status == BUTTON_STATUS_FALLING)
 	{
 		memset(saiplaybuf1,0,SAI_RX_DMA_BUF_SIZE);
 		memset(saiplaybuf2,0,SAI_RX_DMA_BUF_SIZE);			
 		if (longkey >= 3 && longkey <= 100)
 		{
-			keybuf = _SHORTKEY;
 			longkey = 0;
 			if (WorkMode == DEVICE_WORK_NOFLITER)
 			{
@@ -530,7 +527,6 @@ void scan_Key(void)
 		{		
 			memset(saiplaybuf1,0,SAI_RX_DMA_BUF_SIZE);
 			memset(saiplaybuf2,0,SAI_RX_DMA_BUF_SIZE);				
-			keybuf = _LONGKEY;
 			longkey = 0;		
 			dataRecvFlag = 0;
 			WorkMode = DEVICE_WORK_CONFIGURATION;			
@@ -539,7 +535,7 @@ void scan_Key(void)
 		{
 			longkey = 0;			
 		}
-		button_status = 0;
+		button_status = BUTTON_STATUS_DEFAULT;
 	}
 }
 

@@ -35,7 +35,7 @@ void wav_recorder(void)
 	WM8978_Output_Cfg(1,0);
 	WM8978_MIC_Gain(5);		
 	WM8978_LINEIN_Gain(3);	
-	WM8978_HPvol_Set(60,60);
+	WM8978_HPvol_Set(63,63 );
 	WM8978_SPKvol_Set(0);	
 	WM8978_I2S_Cfg(2,0);	
 
